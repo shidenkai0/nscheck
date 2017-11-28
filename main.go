@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 
+	"github.com/miekg/dns"
+
 	"github.com/shidenkai0/nscheck/ns"
 )
 
@@ -14,11 +16,26 @@ func main() {
 	flag.Parse()
 
 	queryLogsChan := ns.PerformFromCSV(ns.Query{RecordType: *rType, Name: *name}, *serversCSV)
-	var successCount int
+	rrs := make(map[string]int)
+	var queriesCount, successCount int
 	for ql := range queryLogsChan {
-		if ql.Err == nil {
-			successCount++
+		queriesCount++
+		if ql.Err != nil {
+			continue
+		}
+		successCount++
+		for _, rr := range ql.RR {
+			switch v := rr.(type) {
+			case *dns.CNAME:
+				rrs[dns.TypeToString[v.Header().Rrtype]+" "+v.Target]++
+			case *dns.A:
+				rrs[dns.TypeToString[v.Header().Rrtype]+" "+v.A.String()]++
+			}
 		}
 	}
-	fmt.Println("Successful queries:", successCount)
+	fmt.Printf("Returned Records:\n")
+	for i, v := range rrs {
+		fmt.Printf("%v: %v\n", i, v)
+	}
+	fmt.Printf("Successful queried %d out of %d servers.\n", successCount, queriesCount)
 }

@@ -5,7 +5,6 @@ import (
 	"net"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/gocarina/gocsv"
 	"github.com/miekg/dns"
@@ -18,17 +17,15 @@ type Query struct {
 
 // NS represents a name server
 type NS struct {
-	IP          net.IP    `csv:"ip"`
-	Name        string    `csv:"name"`
-	CountryID   string    `csv:"country_id"`
-	City        string    `csv:"city"`
-	Reliability float64   `csv:"reliability"`
-	CheckedAt   time.Time `csv:"checked_at"`
-	CreatedAt   time.Time `csv:"created_at"`
+	IP          net.IP  `csv:"ip"`
+	Name        string  `csv:"name"`
+	CountryID   string  `csv:"country_id"`
+	City        string  `csv:"city"`
+	Reliability float64 `csv:"reliability"`
 }
 
 // Query a name server
-func (ns *NS) Perform(q Query) ([]string, error) {
+func (ns *NS) Perform(q Query) ([]dns.RR, error) {
 	q.Name += "."
 	m := new(dns.Msg)
 	m.SetQuestion(q.Name, dns.StringToType[q.RecordType])
@@ -37,11 +34,19 @@ func (ns *NS) Perform(q Query) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var answers []string
-	for _, rr := range res.Answer {
-		answers = append(answers, rr.String())
+	return res.Answer, nil
+}
+
+// Check if a name server is valid
+func (ns *NS) Check() bool {
+	retryCount := 5
+	for i := 0; i < retryCount; i++ {
+		rrs, err := ns.Perform(Query{Name: "www.amazon.com", RecordType: "A"})
+		if err == nil && len(rrs) != 0 {
+			return true
+		}
 	}
-	return answers, nil
+	return false
 }
 
 type NSQuery struct {
@@ -50,8 +55,8 @@ type NSQuery struct {
 }
 
 func (nsq *NSQuery) perform() QueryResult {
-	answers, err := nsq.Ns.Perform(nsq.Q)
-	return QueryResult{Server: nsq.Ns, Answers: answers, Q: nsq.Q, Err: err}
+	rr, err := nsq.Ns.Perform(nsq.Q)
+	return QueryResult{Server: nsq.Ns, RR: rr, Q: nsq.Q, Err: err}
 }
 
 // NSList is a queriable list of NSes
@@ -94,10 +99,10 @@ func process(in <-chan NSQuery, concurrency int) <-chan QueryResult {
 
 // QueryResult represents a set of DNS answers along with metadata on the associated name server
 type QueryResult struct {
-	Server  NS
-	Q       Query
-	Err     error
-	Answers []string
+	Server NS
+	Q      Query
+	Err    error
+	RR     []dns.RR
 }
 
 func buildNSQueries(in <-chan NS, q Query) <-chan NSQuery {
