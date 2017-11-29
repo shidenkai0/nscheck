@@ -1,13 +1,20 @@
 package ns
 
 import (
+	"errors"
 	"fmt"
-	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/gocarina/gocsv"
 	"github.com/miekg/dns"
+)
+
+var (
+	rate         = time.Second / 40
+	rateLimiter  = time.Tick(rate)
+	ErrInvalidNS = errors.New("ns: name server not functional")
 )
 
 type Query struct {
@@ -17,7 +24,7 @@ type Query struct {
 
 // NS represents a name server
 type NS struct {
-	IP          net.IP  `csv:"ip"`
+	IP          string  `csv:"ip"`
 	Name        string  `csv:"name"`
 	CountryID   string  `csv:"country_id"`
 	City        string  `csv:"city"`
@@ -30,7 +37,7 @@ func (ns *NS) Perform(q Query) ([]dns.RR, error) {
 	m := new(dns.Msg)
 	m.SetQuestion(q.Name, dns.StringToType[q.RecordType])
 	//c := new(dns.Client)
-	res, err := dns.Exchange(m, fmt.Sprintf("%v:53", ns.IP))
+	res, err := dns.Exchange(m, fmt.Sprintf("%s:53", ns.IP))
 	if err != nil {
 		return nil, err
 	}
@@ -55,6 +62,9 @@ type NSQuery struct {
 }
 
 func (nsq *NSQuery) perform() QueryResult {
+	if !nsq.Ns.Check() {
+		return QueryResult{Server: nsq.Ns, RR: nil, Q: nsq.Q, Err: ErrInvalidNS}
+	}
 	rr, err := nsq.Ns.Perform(nsq.Q)
 	return QueryResult{Server: nsq.Ns, RR: rr, Q: nsq.Q, Err: err}
 }
@@ -63,7 +73,7 @@ func (nsq *NSQuery) perform() QueryResult {
 type NSList []NS
 
 func (nsl *NSList) Perform(q Query) <-chan QueryResult {
-	return process(nsl.sequentialQueries(q), 256)
+	return process(nsl.sequentialQueries(q), 64)
 }
 
 func (nsl *NSList) sequentialQueries(q Query) <-chan NSQuery {
@@ -84,6 +94,7 @@ func process(in <-chan NSQuery, concurrency int) <-chan QueryResult {
 		wg.Add(1)
 		go func() {
 			for nsq := range in {
+				<-rateLimiter
 				ql := nsq.perform()
 				out <- ql
 			}
@@ -133,7 +144,7 @@ func StreamFromCSV(fileName string) <-chan NS {
 }
 
 func PerformFromCSV(q Query, fileName string) <-chan QueryResult {
-	return process(buildNSQueries(StreamFromCSV(fileName), q), 256)
+	return process(buildNSQueries(StreamFromCSV(fileName), q), 32)
 }
 
 // LoadFromCSV loads a DNS list from CSV

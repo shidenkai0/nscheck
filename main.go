@@ -17,10 +17,13 @@ func main() {
 
 	queryLogsChan := ns.PerformFromCSV(ns.Query{RecordType: *rType, Name: *name}, *serversCSV)
 	rrs := make(map[string]int)
-	var queriesCount, successCount int
+	var queriesCount, successCount, invalidNSCount int
 	for ql := range queryLogsChan {
 		queriesCount++
 		if ql.Err != nil {
+			if ql.Err == ns.ErrInvalidNS {
+				invalidNSCount++
+			}
 			continue
 		}
 		successCount++
@@ -37,5 +40,5 @@ func main() {
 	for i, v := range rrs {
 		fmt.Printf("%v: %v\n", i, v)
 	}
-	fmt.Printf("Successful queried %d out of %d servers.\n", successCount, queriesCount)
+	fmt.Printf("Successful queried %d out of %d servers. NS that didn't pass validity checks with reference domain (www.amazon.com): %d\n", successCount, queriesCount, invalidNSCount)
 }

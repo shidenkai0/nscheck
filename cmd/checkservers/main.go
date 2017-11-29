@@ -26,7 +26,7 @@ func main() {
 	}
 	defer outputFile.Close()
 	writer := gocsv.NewSafeCSVWriter(csv.NewWriter(outputFile))
-	validNSChan := checkNameServers(nsChan, 256)
+	validNSChan := checkNameServers(nsChan, 64)
 	var validCounter int
 	c := make(chan interface{})
 	go func() {
