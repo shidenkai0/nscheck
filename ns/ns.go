@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	rate         = time.Second / 40
+	rate         = time.Second / 100
 	rateLimiter  = time.Tick(rate)
 	ErrInvalidNS = errors.New("ns: name server not functional")
 )
@@ -36,12 +36,17 @@ func (ns *NS) Perform(q Query) ([]dns.RR, error) {
 	q.Name += "."
 	m := new(dns.Msg)
 	m.SetQuestion(q.Name, dns.StringToType[q.RecordType])
-	//c := new(dns.Client)
-	res, err := dns.Exchange(m, fmt.Sprintf("%s:53", ns.IP))
-	if err != nil {
-		return nil, err
+
+	retryCount := 3
+	var err error
+	for i := 0; i < retryCount; i++ {
+		var res *dns.Msg
+		res, err = dns.Exchange(m, fmt.Sprintf("%s:53", ns.IP))
+		if err == nil && len(res.Answer) != 0 {
+			return res.Answer, nil
+		}
 	}
-	return res.Answer, nil
+	return nil, err
 }
 
 // Check if a name server is valid
@@ -144,7 +149,7 @@ func StreamFromCSV(fileName string) <-chan NS {
 }
 
 func PerformFromCSV(q Query, fileName string) <-chan QueryResult {
-	return process(buildNSQueries(StreamFromCSV(fileName), q), 32)
+	return process(buildNSQueries(StreamFromCSV(fileName), q), 64)
 }
 
 // LoadFromCSV loads a DNS list from CSV
